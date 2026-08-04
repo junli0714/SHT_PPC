@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Production Planning Control</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f4f6f8;color:#1f2937}
+.header{background:#111827;color:#fff;padding:22px 28px}
+.header h1{margin:0 0 6px;font-size:25px}.header p{margin:0;color:#cbd5e1}
+.container{padding:22px 28px;max-width:1500px;margin:auto}
+.toolbar{display:flex;gap:14px;flex-wrap:wrap;align-items:end;background:#fff;padding:16px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:18px}
+label{font-size:13px;font-weight:bold;display:block;margin-bottom:6px}
+input,select{border:1px solid #d1d5db;border-radius:7px;padding:9px 11px;background:#fff;min-width:170px}
+button{border:0;border-radius:7px;padding:10px 16px;cursor:pointer;font-weight:bold;background:#2563eb;color:#fff}
+button.secondary{background:#475569}.danger{background:#dc2626}.success{background:#16a34a}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:20px}
+.kpi{background:#fff;padding:18px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.kpi-title{color:#6b7280;font-size:13px}.kpi-value{font-size:28px;font-weight:bold;margin-top:7px}
+.section{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:20px}
+.section h2{margin:0 0 15px;font-size:18px}.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:900px}th,td{padding:12px;border-bottom:1px solid #e5e7eb;text-align:left}
+th{background:#f8fafc;font-size:13px;color:#475569}td{font-size:14px}
+.status{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:bold}
+.running{background:#dcfce7;color:#166534}.maintenance{background:#fee2e2;color:#991b1b}
+.upcoming{background:#fef3c7;color:#92400e}.idle{background:#e5e7eb;color:#374151}
+.progress-bg{width:130px;height:8px;background:#e5e7eb;border-radius:8px;overflow:hidden}
+.progress-bar{height:100%;background:#2563eb;border-radius:8px}
+.machine-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:15px}
+.machine-card{border:1px solid #e5e7eb;border-radius:10px;padding:16px}
+.machine-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.machine-title strong{font-size:18px}.item-box{background:#f8fafc;border-radius:8px;padding:11px;margin-top:9px}
+.item-label{color:#64748b;font-size:11px;text-transform:uppercase}.item-value{margin-top:4px;font-weight:bold}
+.footer{text-align:center;color:#6b7280;font-size:12px;padding:5px 0 20px}
+.modal{display:none;position:fixed;z-index:10;inset:0;background:rgba(15,23,42,.55);align-items:center;justify-content:center;padding:20px}
+.modal-box{background:#fff;width:min(720px,100%);max-height:90vh;overflow:auto;border-radius:14px;padding:24px}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.modal-header h2{margin:0}.close{background:#e5e7eb;color:#111827;padding:7px 11px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.form-group.full{grid-column:1/-1}
+.form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.small{font-size:12px;color:#64748b;margin-top:7px}
+.empty{text-align:center;padding:30px;color:#64748b}
+@media(max-width:800px){.kpis{grid-template-columns:repeat(2,1fr)}.container{padding:15px}.form-grid{grid-template-columns:1fr}}
+@media(max-width:500px){.kpis{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header class="header">
+<h1>🏭 Production Planning Control</h1>
+<p>Daily machine status, ongoing production and the next 3 planned items</p>
+</header>
+
+<main class="container">
+
+<div class="toolbar">
+<div><label for="dateFilter">Production Date</label><input type="date" id="dateFilter"></div>
+<div><label for="machineFilter">Machine</label><select id="machineFilter"><option value="ALL">All Machines</option></select></div>
+<button onclick="openAddModal()">＋ Add Production</button>
+<button class="secondary" onclick="exportData()">📊 Export to Excel</button><div style="margin-left:auto;align-self:center;font-size:12px;color:#64748b">Live update: <strong id="liveClock">--:--:--</strong></div>
+<button class="secondary" onclick="resetData()">Reset Sample Data</button>
+</div>
+
+<section class="kpis">
+<div class="kpi"><div class="kpi-title">Total Machines</div><div class="kpi-value" id="totalMachines">0</div></div>
+<div class="kpi"><div class="kpi-title">Running</div><div class="kpi-value" id="runningMachines">0</div></div>
+<div class="kpi"><div class="kpi-title">Maintenance</div><div class="kpi-value" id="maintenanceMachines">0</div></div>
+<div class="kpi"><div class="kpi-title">Upcoming</div><div class="kpi-value" id="upcomingMachines">0</div></div>
+</section>
+
+<section class="section">
+<h2>📋 Production Schedule</h2>
+<div class="table-wrap">
+<table>
+<thead><tr>
+<th>Machine</th><th>Ongoing Item</th><th>Upcoming 1</th><th>Upcoming 2</th><th>Upcoming 3</th><th>Start</th><th>End</th><th>Progress</th><th>Status</th><th>Action</th>
+</tr></thead>
+<tbody id="scheduleBody"></tbody>
+</table>
+</div>
+</section>
+
+<section class="section">
+<h2>🏭 Machine Status</h2>
+<div class="machine-grid" id="machineCards"></div>
+</section>
+
+<div class="footer">Progress is calculated automatically from Start Time and End Time. The dashboard updates live every second.</div>
+</main>
+
+<div class="modal" id="editModal">
+<div class="modal-box">
+<div class="modal-header"><h2 id="modalTitle">Add Production</h2><button class="close" onclick="closeModal()">✕</button></div>
+<form id="productionForm">
+<div class="form-grid">
+<div class="form-group"><label>Date</label><input type="date" id="formDate" required></div>
+<div class="form-group"><label>Machine</label><input type="text" id="formMachine" placeholder="e.g. IMM-01" required></div>
+<div class="form-group"><label>Ongoing Item</label><input type="text" id="formOngoing" placeholder="e.g. Part A - Housing" required></div>
+<div class="form-group"><label>Upcoming Item 1 (Optional)</label><input type="text" id="formUpcoming" placeholder="e.g. Part B - Cover"></div><div class="form-group"><label>Upcoming Item 2 (Optional)</label><input type="text" id="formUpcoming2" placeholder="e.g. Part C - Trim"></div><div class="form-group"><label>Upcoming Item 3 (Optional)</label><input type="text" id="formUpcoming3" placeholder="e.g. Part D - Bracket"></div>
+<div class="form-group"><label>Start Time</label><input type="time" id="formStart" required></div>
+<div class="form-group"><label>End Time</label><input type="time" id="formEnd" required></div>
+<div class="form-group"><label>Progress (%)</label><input type="number" id="formProgress" min="0" max="100" value="0" required></div>
+<div class="form-group"><label>Status</label>
+<select id="formStatus"><option>Running</option><option>Upcoming</option><option>Maintenance</option><option>Idle</option></select>
+</div>
+</div>
+<div class="small">Changes are saved automatically on this computer/browser.</div>
+<div class="form-actions"><button type="button" class="secondary" onclick="closeModal()">Cancel</button><button class="success" type="submit">Save Production</button></div>
+</form>
+</div>
+</div>
+
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script>
+const sampleData=[
+{date:"2026-08-04",machine:"IMM-01",ongoing:"Part A - Housing",upcoming:"Part B - Cover",upcoming2:"Part C - Trim",upcoming3:"Part D - Bracket",start:"08:00",end:"16:00",progress:65,status:"Running"},
+{date:"2026-08-04",machine:"IMM-02",ongoing:"Part C - Base",upcoming:"Part D - Bracket",upcoming2:"Part E - Clip",upcoming3:"Part F - Panel",start:"08:00",end:"18:00",progress:40,status:"Running"},
+{date:"2026-08-04",machine:"IMM-03",ongoing:"Part E - Cap",upcoming:"Part F - Frame",upcoming2:"Part G - Base",upcoming3:"Part H - Cover",start:"08:00",end:"12:00",progress:90,status:"Running"},
+{date:"2026-08-04",machine:"IMM-04",ongoing:"Scheduled Maintenance",upcoming:"Part G - Panel",upcoming2:"Part H - Housing",upcoming3:"Part I - Cap",start:"08:00",end:"10:00",progress:0,status:"Maintenance"},
+{date:"2026-08-04",machine:"IMM-05",ongoing:"Part H - Knob",upcoming:"Part I - Handle",upcoming2:"Part J - Knob",upcoming3:"Part K - Cover",start:"10:00",end:"18:00",progress:0,status:"Upcoming"},
+{date:"2026-08-05",machine:"IMM-01",ongoing:"Part B - Cover",upcoming:"Part J - Trim",upcoming2:"Part K - Clip",upcoming3:"Part L - Panel",start:"08:00",end:"16:00",progress:0,status:"Upcoming"},
+{date:"2026-08-05",machine:"IMM-02",ongoing:"Part D - Bracket",upcoming:"Part K - Clip",upcoming2:"Part L - Base",upcoming3:"Part M - Frame",start:"08:00",end:"18:00",progress:0,status:"Upcoming"},
+{date:"2026-08-05",machine:"IMM-03",ongoing:"Part F - Frame",upcoming:"Part L - Panel",upcoming2:"Part M - Cover",upcoming3:"Part N - Housing",start:"08:00",end:"16:00",progress:0,status:"Upcoming"}
+];
+
+let productionData=JSON.parse(localStorage.getItem("productionData")||"null")||sampleData;
+let editingIndex=null;
+
+const dateFilter=document.getElementById("dateFilter");
+const machineFilter=document.getElementById("machineFilter");
+dateFilter.value="2026-08-04";
+
+function saveData(){localStorage.setItem("productionData",JSON.stringify(productionData))}
+function statusClass(s){return s.toLowerCase()}
+function refreshMachineFilter(){
+const current=machineFilter.value;
+const machines=[...new Set(productionData.map(x=>x.machine))].sort();
+machineFilter.innerHTML='<option value="ALL">All Machines</option>';
+machines.forEach(m=>{let o=document.createElement("option");o.value=m;o.textContent=m;machineFilter.appendChild(o)});
+if(machines.includes(current))machineFilter.value=current;
+}
+
+
+function timeToMinutes(t){
+    if(!t) return null;
+    const parts=t.split(":").map(Number);
+    return parts[0]*60 + parts[1];
+}
+
+function getScheduleTimes(row){
+    const startMin=timeToMinutes(row.start);
+    const endMin=timeToMinutes(row.end);
+    if(startMin===null || endMin===null) return null;
+    let end=endMin;
+    // Support an overnight schedule, e.g. 22:00 -> 06:00.
+    if(end <= startMin) end += 24*60;
+    return {start:startMin, end:end, duration:end-startMin};
+}
+
+function getAutoProgress(row){
+    // Manual progress is retained as a fallback for maintenance/idle
+    // and for rows without valid times.
+    if(row.status !== "Running") return Number(row.progress) || 0;
+
+    const times=getScheduleTimes(row);
+    if(!times) return Number(row.progress) || 0;
+
+    const now=new Date();
+    const currentMin=now.getHours()*60 + now.getMinutes() + now.getSeconds()/60;
+    let current=currentMin;
+
+    // If the schedule crosses midnight, map early-morning time to next day.
+    if(times.end > 1440 && current < times.start) current += 1440;
+
+    if(current <= times.start) return 0;
+    if(current >= times.end) return 100;
+
+    return Math.max(0, Math.min(100,
+        Math.round(((current-times.start)/times.duration)*100)
+    ));
+}
+
+function getDisplayProgress(row){
+    return getAutoProgress(row);
+}
+
+function getDisplayStatus(row){
+    if(row.status === "Running"){
+        const p=getAutoProgress(row);
+        if(p >= 100) return "Completed";
+    }
+    return row.status;
+}
+
+function getTimeLabel(row){
+    if(row.status !== "Running") return row.status === "Upcoming" ? "Waiting to start" : "";
+    const times=getScheduleTimes(row);
+    if(!times) return "";
+
+    const now=new Date();
+    const currentMin=now.getHours()*60 + now.getMinutes() + now.getSeconds()/60;
+    let current=currentMin;
+    if(times.end > 1440 && current < times.start) current += 1440;
+
+    if(current < times.start) return "Starts at " + row.start;
+    if(current >= times.end) return "Completed";
+
+    const remaining=times.end-current;
+    const hours=Math.floor(remaining/60);
+    const mins=Math.floor(remaining%60);
+    return hours > 0 ? hours + "h " + mins + "m remaining" : mins + "m remaining";
+}
+
+function updateLiveClock(){
+    const now=new Date();
+    document.getElementById("liveClock").textContent =
+        now.toLocaleTimeString([], {hour12:false});
+}
+
+function render(){
+refreshMachineFilter();
+const d=dateFilter.value,m=machineFilter.value;
+let filtered=productionData.filter(x=>x.date===d);
+if(m!=="ALL")filtered=filtered.filter(x=>x.machine===m);
+
+document.getElementById("totalMachines").textContent=filtered.length;
+document.getElementById("runningMachines").textContent=filtered.filter(x=>x.status==="Running").length;
+document.getElementById("maintenanceMachines").textContent=filtered.filter(x=>x.status==="Maintenance").length;
+document.getElementById("upcomingMachines").textContent=filtered.filter(x=>x.status==="Upcoming").length;
+
+const body=document.getElementById("scheduleBody");
+body.innerHTML="";
+if(!filtered.length){body.innerHTML='<tr><td colspan="10" class="empty">No production plan for this date.</td></tr>'}
+filtered.forEach((row)=>{
+const index=productionData.indexOf(row);
+body.innerHTML+=`<tr>
+<td><strong>${escapeHtml(row.machine)}</strong></td><td>${escapeHtml(row.ongoing)}</td><td>${escapeHtml(row.upcoming)}</td><td>${escapeHtml(row.upcoming2 || "")}</td><td>${escapeHtml(row.upcoming3 || "")}</td>
+<td>${row.start}</td><td>${row.end}</td>
+<td>
+    <div><strong>${getDisplayProgress(row)}%</strong></div>
+    <div class="progress-bg"><div class="progress-bar" style="width:${getDisplayProgress(row)}%"></div></div>
+    <div class="small">${getTimeLabel(row)}</div>
+</td>
+<td><span class="status ${statusClass(getDisplayStatus(row))}">${getDisplayStatus(row)}</span></td>
+<td><button onclick="openEditModal(${index})">Edit</button> <button class="danger" onclick="deleteRow(${index})">Delete</button></td>
+</tr>`;
+});
+
+const cards=document.getElementById("machineCards");cards.innerHTML="";
+filtered.forEach(row=>{
+cards.innerHTML+=`<div class="machine-card">
+<div class="machine-title"><strong>${escapeHtml(row.machine)}</strong><span class="status ${statusClass(row.status)}">${row.status}</span></div>
+<div class="item-box"><div class="item-label">Ongoing Item</div><div class="item-value">${escapeHtml(row.ongoing)}</div></div>
+<div class="item-box"><div class="item-label">Upcoming Item 1</div><div class="item-value">${escapeHtml(row.upcoming)}</div></div><div class="item-box"><div class="item-label">Upcoming Item 2</div><div class="item-value">${escapeHtml(row.upcoming2 || "")}</div></div><div class="item-box"><div class="item-label">Upcoming Item 3</div><div class="item-value">${escapeHtml(row.upcoming3 || "")}</div></div>
+<div class="item-box"><div class="item-label">Production Time</div><div class="item-value">${row.start} → ${row.end}</div></div>
+<div class="item-box"><div class="item-label">Progress</div><div class="item-value">${getDisplayProgress(row)}% — ${getTimeLabel(row)}</div></div>
+</div>`;
+});
+}
+
+function escapeHtml(text){
+return String(text).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+}
+
+function openAddModal(){
+editingIndex=null;
+document.getElementById("modalTitle").textContent="Add Production";
+document.getElementById("productionForm").reset();
+document.getElementById("formDate").value=dateFilter.value;
+document.getElementById("formProgress").value=0;
+document.getElementById("editModal").style.display="flex";
+}
+function openEditModal(index){
+editingIndex=index;
+const x=productionData[index];
+document.getElementById("modalTitle").textContent="Edit Production";
+document.getElementById("formDate").value=x.date;
+document.getElementById("formMachine").value=x.machine;
+document.getElementById("formOngoing").value=x.ongoing;
+document.getElementById("formUpcoming").value=x.upcoming || "";
+document.getElementById("formUpcoming2").value=x.upcoming2 || "";
+document.getElementById("formUpcoming3").value=x.upcoming3 || "";
+document.getElementById("formStart").value=x.start;
+document.getElementById("formEnd").value=x.end;
+document.getElementById("formProgress").value=x.progress;
+document.getElementById("formStatus").value=x.status;
+document.getElementById("editModal").style.display="flex";
+}
+function closeModal(){document.getElementById("editModal").style.display="none"}
+document.getElementById("productionForm").addEventListener("submit",e=>{
+e.preventDefault();
+const x={
+date:document.getElementById("formDate").value,
+machine:document.getElementById("formMachine").value.trim(),
+ongoing:document.getElementById("formOngoing").value.trim(),
+upcoming:document.getElementById("formUpcoming").value.trim(),
+upcoming2:document.getElementById("formUpcoming2").value.trim(),
+upcoming3:document.getElementById("formUpcoming3").value.trim(),
+start:document.getElementById("formStart").value,
+end:document.getElementById("formEnd").value,
+progress:Number(document.getElementById("formProgress").value),
+status:document.getElementById("formStatus").value
+};
+if(editingIndex===null)productionData.push(x);else productionData[editingIndex]=x;
+saveData();closeModal();dateFilter.value=x.date;machineFilter.value="ALL";render();
+});
+function deleteRow(index){
+if(confirm("Delete this production plan?")){productionData.splice(index,1);saveData();render()}
+}
+function resetData(){
+if(confirm("Reset the dashboard to the original sample data?")){productionData=JSON.parse(JSON.stringify(sampleData));saveData();render()}
+}
+function resetFilters(){dateFilter.value="2026-08-04";machineFilter.value="ALL";render()}
+function exportData(){
+    if(typeof XLSX === "undefined"){
+        alert("Excel export library could not be loaded. Please check your internet connection and try again.");
+        return;
+    }
+
+    const excelData = productionData.map(x => ({
+        "Date": x.date,
+        "Machine": x.machine,
+        "Ongoing Item": x.ongoing,
+        "Upcoming Item 1": x.upcoming || "",
+        "Upcoming Item 2": x.upcoming2 || "",
+        "Upcoming Item 3": x.upcoming3 || "",
+        "Start Time": x.start,
+        "End Time": x.end,
+        "Progress (%)": x.progress,
+        "Status": x.status
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    worksheet["!cols"] = [
+        {wch:14},{wch:14},{wch:25},{wch:25},{wch:25},
+        {wch:25},{wch:12},{wch:12},{wch:14},{wch:16}
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Production Plan");
+
+    const today = new Date().toISOString().slice(0,10);
+    XLSX.writeFile(workbook, "Production_Planning_" + today + ".xlsx");
+}
+dateFilter.addEventListener("change",render);
+machineFilter.addEventListener("change",render);
+window.addEventListener("click",e=>{if(e.target===document.getElementById("editModal"))closeModal()});
+render();
+updateLiveClock();
+
+// Recalculate progress every minute and refresh the live clock every second.
+setInterval(() => {
+    updateLiveClock();
+    render();
+}, 1000);
+</script>
+</body>
+</html>
