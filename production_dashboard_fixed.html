@@ -18,10 +18,15 @@ label{font-size:13px;font-weight:bold;display:block;margin-bottom:6px}
 input,select{border:1px solid #d1d5db;border-radius:7px;padding:9px 11px;background:#fff;min-width:170px}
 button{border:0;border-radius:7px;padding:10px 16px;cursor:pointer;font-weight:bold;background:#2563eb;color:#fff}
 button.secondary{background:#475569}.danger{background:#dc2626}.success{background:#16a34a}
-.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:20px}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:20px}
 .kpi{background:#fff;padding:18px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 .kpi-title{color:#6b7280;font-size:13px}.kpi-value{font-size:28px;font-weight:bold;margin-top:7px}
 .section{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:20px}
+.section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}
+.section-header h2{margin:0}
+.minimize-btn{background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;padding:5px 12px;font-size:12px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.minimize-btn:hover{background:#e2e8f0}
+.section.collapsed .table-wrap,.section.collapsed .machine-grid{display:none}
 .section h2{margin:0 0 15px;font-size:18px}.table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;min-width:900px}th,td{padding:12px;border-bottom:1px solid #e5e7eb;text-align:left}
 th{background:#f8fafc;font-size:13px;color:#475569}td{font-size:14px}
@@ -70,24 +75,36 @@ th{background:#f8fafc;font-size:13px;color:#475569}td{font-size:14px}
 <div class="kpi"><div class="kpi-title">Total Machines</div><div class="kpi-value" id="totalMachines">0</div></div>
 <div class="kpi"><div class="kpi-title">Running</div><div class="kpi-value" id="runningMachines">0</div></div>
 <div class="kpi"><div class="kpi-title">Maintenance</div><div class="kpi-value" id="maintenanceMachines">0</div></div>
-<div class="kpi"><div class="kpi-title">Upcoming</div><div class="kpi-value" id="upcomingMachines">0</div></div>
 </section>
 
-<section class="section">
-<h2>📋 Production Schedule</h2>
+<section class="section" id="scheduleSection">
+<div class="section-header">
+<h2>📋 Production Schedule – CNC</h2>
+<button class="minimize-btn" id="scheduleSection-toggle" onclick="toggleSection('scheduleSection')">➖ Minimize</button>
+</div>
 <div class="table-wrap">
 <table>
 <thead><tr>
-<th>Machine</th><th>Ongoing Item</th><th>Upcoming 1</th><th>Upcoming 2</th><th>Upcoming 3</th><th>Start</th><th>End</th><th>Progress</th><th>Status</th>
+<th>Machine</th><th>Ongoing Item</th><th>Upcoming 1</th><th>Upcoming 2</th><th>Upcoming 3</th><th>Start</th><th>End</th><th>Progress</th><th>Status</th><th>Remark</th>
 </tr></thead>
 <tbody id="scheduleBody"></tbody>
 </table>
 </div>
 </section>
 
-<section class="section">
-<h2>🏭 Machine Status</h2>
-<div class="machine-grid" id="machineCards"></div>
+<section class="section" id="edmSection">
+<div class="section-header">
+<h2>📋 Production Schedule – EDM</h2>
+<button class="minimize-btn" id="edmSection-toggle" onclick="toggleSection('edmSection')">➖ Minimize</button>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr>
+<th>Machine</th><th>Ongoing Item</th><th>Upcoming 1</th><th>Upcoming 2</th><th>Upcoming 3</th><th>Start</th><th>End</th><th>Progress</th><th>Status</th><th>Remark</th>
+</tr></thead>
+<tbody id="edmScheduleBody"></tbody>
+</table>
+</div>
 </section>
 
 <div class="footer">Progress is calculated automatically from Start Time and End Time. The dashboard updates live every second.</div>
@@ -96,7 +113,9 @@ th{background:#f8fafc;font-size:13px;color:#475569}td{font-size:14px}
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script>
 
-const GOOGLE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwwE2_Yojt9BJEX3uHwkSvG0gh2rJlMkvDVrIskte8RV3gmvyeXt6f01WLZMnqPGaGiPw/exec";
+const GOOGLE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxTcGTKGRyx3OGw3CVkASQ6E29Shd5diVSHbjDq1tEi_zh7-SQGI6p0sykcKx1BDoAp3Q/exec";
+const CNC_SHEET_NAME = "CNC";
+const EDM_SHEET_NAME = "EDM";
 
 let googleSheetMode = true;
 
@@ -151,11 +170,65 @@ function normalizeTime(value){
     return s;
 }
 
-function loadGoogleSheet() {
-    const status = document.getElementById("sheetStatus");
-    if (status) status.textContent = "Loading production data…";
+function parseSheetData(data) {
+    if (!Array.isArray(data) || data.length < 2)
+        throw new Error("No production data found.");
 
-    fetch(GOOGLE_APPS_SCRIPT_URL + "?_=" + Date.now(), {
+    const headers = data[0].map(v => String(v || "").trim().toLowerCase().replace(/\s+/g, " "));
+    const col = (...names) => {
+        for (const name of names) {
+            const i = headers.indexOf(String(name).toLowerCase().replace(/\s+/g, " "));
+            if (i >= 0) return i;
+        }
+        return undefined;
+    };
+
+    const cDate=col("Date"), cMachine=col("Machine"), cOngoing=col("Ongoing Item","Ongoing");
+    const cUp1=col("Upcoming Item 1","Upcoming 1","Upcoming Item");
+    const cUp2=col("Upcoming Item 2","Upcoming 2"), cUp3=col("Upcoming Item 3","Upcoming 3");
+    const cStart=col("Start Time","Start"), cEnd=col("End Time","End"), cStatus=col("Status"), cRemark=col("Remark","Remarks");
+
+    if ([cDate,cMachine,cOngoing,cStart,cEnd].some(i => i === undefined))
+        throw new Error("Required columns are missing. Check Row 1 of your Google Sheet.");
+
+    function toISO(value) {
+        const s = String(value || "").trim();
+        if (!s) return "";
+        if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) {
+            const [y,m,d] = s.split("-").map(Number);
+            return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+        }
+        const m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+        if (m) {
+            const [,d,mo,y] = m;
+            return `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+        }
+        const dt = new Date(s);
+        if (!isNaN(dt)) return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+        return s;
+    }
+
+    return data.slice(1).map(r => ({
+        date: toISO(r[cDate]),
+        machine: String(r[cMachine] || "").trim(),
+        ongoing: String(r[cOngoing] || "").trim(),
+        upcoming: cUp1 === undefined ? "" : String(r[cUp1] || "").trim(),
+        upcoming2: cUp2 === undefined ? "" : String(r[cUp2] || "").trim(),
+        upcoming3: cUp3 === undefined ? "" : String(r[cUp3] || "").trim(),
+        start: String(r[cStart] || "").trim(),
+        end: String(r[cEnd] || "").trim(),
+        progress: 0,
+        status: cStatus === undefined || !String(r[cStatus] || "").trim()
+            ? "Running" : String(r[cStatus]).trim(),
+        remark: cRemark === undefined ? "" : String(r[cRemark] || "").trim()
+    })).filter(x => x.machine && x.date);
+}
+
+// Fetches one tab. The "sheet" query param requires the Apps Script's doGet()
+// to read e.parameter.sheet and return that tab's values — see the setup
+// note we discussed for the doGet() update needed to support this.
+function fetchSheet(sheetName) {
+    return fetch(GOOGLE_APPS_SCRIPT_URL + "?sheet=" + encodeURIComponent(sheetName) + "&_=" + Date.now(), {
         method: "GET",
         cache: "no-store"
     })
@@ -163,58 +236,20 @@ function loadGoogleSheet() {
         if (!r.ok) throw new Error("Apps Script returned HTTP " + r.status);
         return r.json();
     })
-    .then(data => {
-        if (!Array.isArray(data) || data.length < 2)
-            throw new Error("No production data found.");
+    .then(parseSheetData);
+}
 
-        const headers = data[0].map(v => String(v || "").trim().toLowerCase().replace(/\s+/g, " "));
-        const col = (...names) => {
-            for (const name of names) {
-                const i = headers.indexOf(String(name).toLowerCase().replace(/\s+/g, " "));
-                if (i >= 0) return i;
-            }
-            return undefined;
-        };
+function loadGoogleSheet() {
+    const status = document.getElementById("sheetStatus");
+    if (status) status.textContent = "Loading production data…";
 
-        const cDate=col("Date"), cMachine=col("Machine"), cOngoing=col("Ongoing Item","Ongoing");
-        const cUp1=col("Upcoming Item 1","Upcoming 1","Upcoming Item");
-        const cUp2=col("Upcoming Item 2","Upcoming 2"), cUp3=col("Upcoming Item 3","Upcoming 3");
-        const cStart=col("Start Time","Start"), cEnd=col("End Time","End"), cStatus=col("Status");
-
-        if ([cDate,cMachine,cOngoing,cStart,cEnd].some(i => i === undefined))
-            throw new Error("Required columns are missing. Check Row 1 of your Google Sheet.");
-
-        function toISO(value) {
-            const s = String(value || "").trim();
-            if (!s) return "";
-            if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) {
-                const [y,m,d] = s.split("-").map(Number);
-                return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-            }
-            const m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
-            if (m) {
-                const [,d,mo,y] = m;
-                return `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-            }
-            const dt = new Date(s);
-            if (!isNaN(dt)) return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
-            return s;
-        }
-
-        productionData = data.slice(1).map(r => ({
-            date: toISO(r[cDate]),
-            machine: String(r[cMachine] || "").trim(),
-            ongoing: String(r[cOngoing] || "").trim(),
-            upcoming: cUp1 === undefined ? "" : String(r[cUp1] || "").trim(),
-            upcoming2: cUp2 === undefined ? "" : String(r[cUp2] || "").trim(),
-            upcoming3: cUp3 === undefined ? "" : String(r[cUp3] || "").trim(),
-            start: String(r[cStart] || "").trim(),
-            end: String(r[cEnd] || "").trim(),
-            progress: 0,
-            status: cStatus === undefined || !String(r[cStatus] || "").trim()
-                ? "Running" : String(r[cStatus]).trim()
-        })).filter(x => x.machine && x.date);
-
+    Promise.all([
+        fetchSheet(CNC_SHEET_NAME),
+        fetchSheet(EDM_SHEET_NAME)
+    ])
+    .then(([cncRows, edmRows]) => {
+        productionData = cncRows;
+        edmProductionData = edmRows;
         googleSheetMode = true;
         render();
         if (status) status.textContent =
@@ -228,21 +263,34 @@ function loadGoogleSheet() {
 }
 
 const sampleData=[
-{date:"2026-08-04",machine:"IMM-01",ongoing:"Part A - Housing",upcoming:"Part B - Cover",upcoming2:"Part C - Trim",upcoming3:"Part D - Bracket",start:"08:00",end:"16:00",progress:65,status:"Running"},
-{date:"2026-08-04",machine:"IMM-02",ongoing:"Part C - Base",upcoming:"Part D - Bracket",upcoming2:"Part E - Clip",upcoming3:"Part F - Panel",start:"08:00",end:"18:00",progress:40,status:"Running"},
-{date:"2026-08-04",machine:"IMM-03",ongoing:"Part E - Cap",upcoming:"Part F - Frame",upcoming2:"Part G - Base",upcoming3:"Part H - Cover",start:"08:00",end:"12:00",progress:90,status:"Running"},
-{date:"2026-08-04",machine:"IMM-04",ongoing:"Scheduled Maintenance",upcoming:"Part G - Panel",upcoming2:"Part H - Housing",upcoming3:"Part I - Cap",start:"08:00",end:"10:00",progress:0,status:"Maintenance"},
-{date:"2026-08-04",machine:"IMM-05",ongoing:"Part H - Knob",upcoming:"Part I - Handle",upcoming2:"Part J - Knob",upcoming3:"Part K - Cover",start:"10:00",end:"18:00",progress:0,status:"Upcoming"},
-{date:"2026-08-05",machine:"IMM-01",ongoing:"Part B - Cover",upcoming:"Part J - Trim",upcoming2:"Part K - Clip",upcoming3:"Part L - Panel",start:"08:00",end:"16:00",progress:0,status:"Upcoming"},
-{date:"2026-08-05",machine:"IMM-02",ongoing:"Part D - Bracket",upcoming:"Part K - Clip",upcoming2:"Part L - Base",upcoming3:"Part M - Frame",start:"08:00",end:"18:00",progress:0,status:"Upcoming"},
-{date:"2026-08-05",machine:"IMM-03",ongoing:"Part F - Frame",upcoming:"Part L - Panel",upcoming2:"Part M - Cover",upcoming3:"Part N - Housing",start:"08:00",end:"16:00",progress:0,status:"Upcoming"}
+{date:"2026-08-04",machine:"IMM-01",ongoing:"Part A - Housing",upcoming:"Part B - Cover",upcoming2:"Part C - Trim",upcoming3:"Part D - Bracket",start:"08:00",end:"16:00",progress:65,status:"Running",remark:""},
+{date:"2026-08-04",machine:"IMM-02",ongoing:"Part C - Base",upcoming:"Part D - Bracket",upcoming2:"Part E - Clip",upcoming3:"Part F - Panel",start:"08:00",end:"18:00",progress:40,status:"Running",remark:""},
+{date:"2026-08-04",machine:"IMM-03",ongoing:"Part E - Cap",upcoming:"Part F - Frame",upcoming2:"Part G - Base",upcoming3:"Part H - Cover",start:"08:00",end:"12:00",progress:90,status:"Running",remark:""},
+{date:"2026-08-04",machine:"IMM-04",ongoing:"Scheduled Maintenance",upcoming:"Part G - Panel",upcoming2:"Part H - Housing",upcoming3:"Part I - Cap",start:"08:00",end:"10:00",progress:0,status:"Maintenance",remark:""},
+{date:"2026-08-04",machine:"IMM-05",ongoing:"Part H - Knob",upcoming:"Part I - Handle",upcoming2:"Part J - Knob",upcoming3:"Part K - Cover",start:"10:00",end:"18:00",progress:0,status:"Upcoming",remark:""},
+{date:"2026-08-05",machine:"IMM-01",ongoing:"Part B - Cover",upcoming:"Part J - Trim",upcoming2:"Part K - Clip",upcoming3:"Part L - Panel",start:"08:00",end:"16:00",progress:0,status:"Upcoming",remark:"",remark:""},
+{date:"2026-08-05",machine:"IMM-02",ongoing:"Part D - Bracket",upcoming:"Part K - Clip",upcoming2:"Part L - Base",upcoming3:"Part M - Frame",start:"08:00",end:"18:00",progress:0,status:"Upcoming",remark:""},
+{date:"2026-08-05",machine:"IMM-03",ongoing:"Part F - Frame",upcoming:"Part L - Panel",upcoming2:"Part M - Cover",upcoming3:"Part N - Housing",start:"08:00",end:"16:00",progress:0,status:"Upcoming",remark:"",remark:""}
 ];
 
 let productionData=sampleData.slice();
 
+const edmSampleData=[
+{date:"2026-08-04",machine:"EDM-01",ongoing:"Mold Cavity A",upcoming:"Mold Cavity B",upcoming2:"",upcoming3:"",start:"08:00",end:"16:00",progress:50,status:"Running",remark:""},
+{date:"2026-08-04",machine:"EDM-02",ongoing:"Electrode Finishing",upcoming:"Core Insert C",upcoming2:"",upcoming3:"",start:"09:00",end:"17:00",progress:20,status:"Running",remark:""}
+];
+let edmProductionData=edmSampleData.slice();
+
 const dateFilter=document.getElementById("dateFilter");
 const machineFilter=document.getElementById("machineFilter");
-dateFilter.value="2026-08-04";
+
+// Local YYYY-MM-DD for "today" (avoids the UTC off-by-one issue toISOString() has near midnight).
+function todayStr(){
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+
+dateFilter.value=todayStr();
 
 function saveData(){ if(!googleSheetMode) localStorage.setItem("productionData",JSON.stringify(productionData)); }
 function statusClass(s){return s.toLowerCase()}
@@ -358,21 +406,11 @@ function updateLiveClock(){
         now.toLocaleTimeString([], {hour12:false});
 }
 
-function render(){
-refreshMachineFilter();
-const d=dateFilter.value,m=machineFilter.value;
-let filtered=productionData.filter(x=>x.date===d);
-if(m!=="ALL")filtered=filtered.filter(x=>x.machine===m);
-
-document.getElementById("totalMachines").textContent=filtered.length;
-document.getElementById("runningMachines").textContent=filtered.filter(x=>x.status==="Running").length;
-document.getElementById("maintenanceMachines").textContent=filtered.filter(x=>x.status==="Maintenance").length;
-document.getElementById("upcomingMachines").textContent=filtered.filter(x=>x.status==="Upcoming").length;
-
-const body=document.getElementById("scheduleBody");
+function renderScheduleTable(tbodyId, rows){
+const body=document.getElementById(tbodyId);
 body.innerHTML="";
-if(!filtered.length){body.innerHTML='<tr><td colspan="10" class="empty">No production plan for this date.</td></tr>'}
-filtered.forEach((row)=>{
+if(!rows.length){body.innerHTML='<tr><td colspan="10" class="empty">No production plan for this date.</td></tr>';return}
+rows.forEach((row)=>{
 body.innerHTML+=`<tr>
 <td><strong>${escapeHtml(row.machine)}</strong></td><td>${escapeHtml(row.ongoing)}</td><td>${escapeHtml(row.upcoming)}</td><td>${escapeHtml(row.upcoming2 || "")}</td><td>${escapeHtml(row.upcoming3 || "")}</td>
 <td>${escapeHtml(normalizeTime(row.start))}</td><td>${escapeHtml(normalizeTime(row.end))}</td>
@@ -381,20 +419,27 @@ body.innerHTML+=`<tr>
     <div class="progress-bg"><div class="progress-bar" style="width:${getDisplayProgress(row)}%"></div></div>
     <div class="small">${getTimeLabel(row)}</div>
 </td>
-<td><span class="status ${statusClass(getDisplayStatus(row))}">${getDisplayStatus(row)}</span></td>
+<td><span class="status ${statusClass(getDisplayStatus(row))}">${getDisplayStatus(row)}</span></td><td>${escapeHtml(row.remark || "")}</td>
 </tr>`;
 });
+}
 
-const cards=document.getElementById("machineCards");cards.innerHTML="";
-filtered.forEach(row=>{
-cards.innerHTML+=`<div class="machine-card">
-<div class="machine-title"><strong>${escapeHtml(row.machine)}</strong><span class="status ${statusClass(row.status)}">${row.status}</span></div>
-<div class="item-box"><div class="item-label">Ongoing Item</div><div class="item-value">${escapeHtml(row.ongoing)}</div></div>
-<div class="item-box"><div class="item-label">Upcoming Item 1</div><div class="item-value">${escapeHtml(row.upcoming)}</div></div><div class="item-box"><div class="item-label">Upcoming Item 2</div><div class="item-value">${escapeHtml(row.upcoming2 || "")}</div></div><div class="item-box"><div class="item-label">Upcoming Item 3</div><div class="item-value">${escapeHtml(row.upcoming3 || "")}</div></div>
-<div class="item-box"><div class="item-label">Production Time</div><div class="item-value">${escapeHtml(normalizeTime(row.start))} → ${escapeHtml(normalizeTime(row.end))}</div></div>
-<div class="item-box"><div class="item-label">Progress</div><div class="item-value">${getDisplayProgress(row)}% — ${getTimeLabel(row)}</div></div>
-</div>`;
-});
+function render(){
+refreshMachineFilter();
+const d=dateFilter.value,m=machineFilter.value;
+let filtered=productionData.filter(x=>x.date===d);
+if(m!=="ALL")filtered=filtered.filter(x=>x.machine===m);
+
+const edmFiltered=edmProductionData.filter(x=>x.date===d);
+
+// KPI cards reflect CNC + EDM combined so the totals cover every machine.
+const combined=filtered.concat(edmFiltered);
+document.getElementById("totalMachines").textContent=combined.length;
+document.getElementById("runningMachines").textContent=combined.filter(x=>x.status==="Running").length;
+document.getElementById("maintenanceMachines").textContent=combined.filter(x=>x.status==="Maintenance").length;
+
+renderScheduleTable("scheduleBody", filtered);
+renderScheduleTable("edmScheduleBody", edmFiltered);
 }
 
 function escapeHtml(text){
@@ -402,42 +447,69 @@ return String(text).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"
 }
 
 function resetData(){
-if(confirm("Reset the dashboard to the original sample data?")){productionData=JSON.parse(JSON.stringify(sampleData));saveData();render()}
+if(confirm("Reset the dashboard to the original sample data?")){
+    productionData=JSON.parse(JSON.stringify(sampleData));
+    edmProductionData=JSON.parse(JSON.stringify(edmSampleData));
+    saveData();render()
 }
-function resetFilters(){dateFilter.value="2026-08-04";machineFilter.value="ALL";render()}
+}
+function resetFilters(){dateFilter.value=todayStr();machineFilter.value="ALL";render()}
 function exportData(){
     if(typeof XLSX === "undefined"){
         alert("Excel export library could not be loaded. Please check your internet connection and try again.");
         return;
     }
 
-    const excelData = productionData.map(x => ({
-        "Date": x.date,
-        "Machine": x.machine,
-        "Ongoing Item": x.ongoing,
-        "Upcoming Item 1": x.upcoming || "",
-        "Upcoming Item 2": x.upcoming2 || "",
-        "Upcoming Item 3": x.upcoming3 || "",
-        "Start Time": x.start,
-        "End Time": x.end,
-        "Progress (%)": x.progress,
-        "Status": x.status
-    }));
+    function toRows(data){
+        return data.map(x => ({
+            "Date": x.date,
+            "Machine": x.machine,
+            "Ongoing Item": x.ongoing,
+            "Upcoming Item 1": x.upcoming || "",
+            "Upcoming Item 2": x.upcoming2 || "",
+            "Upcoming Item 3": x.upcoming3 || "",
+            "Start Time": x.start,
+            "End Time": x.end,
+            "Remark": x.remark || "",
+            "Progress (%)": x.progress,
+            "Status": x.status
+        }));
+    }
 
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    worksheet["!cols"] = [
+    const colWidths = [
         {wch:14},{wch:14},{wch:25},{wch:25},{wch:25},
-        {wch:25},{wch:12},{wch:12},{wch:14},{wch:16}
+        {wch:12},{wch:12},{wch:12},{wch:14},{wch:30},{wch:16}
     ];
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Production Plan");
+
+    const cncSheet = XLSX.utils.json_to_sheet(toRows(productionData));
+    cncSheet["!cols"] = colWidths;
+    XLSX.utils.book_append_sheet(workbook, cncSheet, "CNC");
+
+    const edmSheet = XLSX.utils.json_to_sheet(toRows(edmProductionData));
+    edmSheet["!cols"] = colWidths;
+    XLSX.utils.book_append_sheet(workbook, edmSheet, "EDM");
 
     const today = new Date().toISOString().slice(0,10);
     XLSX.writeFile(workbook, "Production_Planning_" + today + ".xlsx");
 }
 dateFilter.addEventListener("change",render);
 machineFilter.addEventListener("change",render);
+function toggleSection(id){
+    const section = document.getElementById(id);
+    const btn = document.getElementById(id + "-toggle");
+    const collapsed = section.classList.toggle("collapsed");
+    btn.textContent = collapsed ? "➕ Expand" : "➖ Minimize";
+    localStorage.setItem("collapsed:" + id, collapsed ? "1" : "0");
+}
+["scheduleSection","edmSection"].forEach(id=>{
+    if(localStorage.getItem("collapsed:" + id) === "1"){
+        document.getElementById(id).classList.add("collapsed");
+        document.getElementById(id + "-toggle").textContent = "➕ Expand";
+    }
+});
+
 render();
 updateLiveClock();
 
